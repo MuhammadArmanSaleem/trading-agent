@@ -1,141 +1,157 @@
-# Trading Lab
+# Trading Lab — practice first
 
-A lightweight local desktop research app for Arman's multi-market trading project.
-Separate **Crypto, Forex and Stocks** workspaces; a locally trained machine-learning
-classifier, a trend-rule baseline, historical simulation and saved reports.
+A local desktop app for people who are new to trading. Create a virtual account,
+press **Start practice**, and see what the bot does in plain language. No CSV files,
+API keys or model configuration are needed in the main flow.
 
-**Version 1 is an offline historical simulator, not a live trading bot.** It cannot
-place orders or obtain current prices. Included prices are synthetic demonstrations,
-not evidence of trading profit. No broker account or paid API is required.
+**This release uses virtual money only. It cannot trade real funds.** It includes
+an actual small, locally trained ML model, but has no established profitable edge.
 
-## Windows setup
+## Start on Windows
 
-1. Install Python 3.10 or newer from https://www.python.org/downloads/windows/.
-   Keep Tcl/Tk enabled. No pip dependencies or GPU are needed.
-2. Download this repository using **Code → Download ZIP**, then extract it.
-3. Double-click **START-WINDOWS.bat**, or run `py -3 app.py` in this folder.
-4. Choose a market and click **Train & run test** to try the synthetic demo.
-5. Import historical OHLC CSV data to test on real prices. Set costs to match the
-   intended instrument and venue before interpreting results.
-6. Compare both strategies; inspect trades, replay bars and export a JSON report.
+1. Install [Python 3.10+](https://www.python.org/downloads/windows/) with Tcl/Tk enabled.
+2. Download this branch/repository as a ZIP and extract it.
+3. Double-click **START-WINDOWS.bat** (or run `py -3 app.py`).
+4. Choose a market, a price source and your virtual limits.
+5. Click **Create practice account**, then **Start practice**.
 
-On macOS/Linux use `python3 app.py`. Python needs Tk (e.g. `python3-tk` on
-Debian/Ubuntu). Closing the app stops computation; there are no background orders.
+No pip packages, GPU, paid AI subscription or trading account are needed. On
+macOS/Linux use `python3 app.py`; Python must include Tk support.
 
-## Included
+## What each section supports
 
-- Independent in-session datasets/results for Crypto, Forex and Stocks.
-- CSV validation and a chronological 60% training / 40% test split.
-- L2 logistic regression trained locally, plus a 10/30-bar moving-average strategy.
-- Long/flat positions, allocation cap, stop loss, target and drawdown halt.
-- Fees and slippage on both entry and exit; trade reasons and realized P/L.
-- Equity chart, closing drawdown, buy-and-hold reference and historical replay.
-- SQLite run history at `~/TradingLabData/runs.sqlite3`; full JSON report export.
-- Headless runner and tests for accounting, risk controls and future-data leakage.
+| Section | Offline demo | Practice with real prices | Real-money trading |
+|---|---|---|---|
+| Crypto | Yes, generated prices | Bitcoin / USD, read-only Kraken public data | Not available |
+| Forex | Yes, generated prices | Not connected | Not available |
+| Stocks | Yes, generated prices | Not connected | Not available |
 
-All sections share a **generic, unleveraged, fractional-unit simulator**. They are
-not broker-specific implementations. Balance and P/L use the instrument's quote
-currency, not automatically PKR/USD. Import only one symbol and interval per file.
-Data selections are in-session; completed reports persist across restarts.
+The Bitcoin feed is an engineering starting point, not an investment recommendation
+or a recommendation to open a Kraken account. Availability depends on network and
+provider access. A blocked feed produces a visible error; it never silently switches
+to demo data. No authenticated broker API is present.
 
-## CSV format
+## Beginner controls
 
-UTF-8, 150–100,000 rows, maximum 30 MB. Required headers (case insensitive):
+| Control | What happens |
+|---|---|
+| Start practice / Reconnect | Prepare the local model if needed, read prices and permit new virtual trades |
+| Pause new trades | Stop new entries; existing holdings and exit rules still update while connected |
+| Close practice position | Fetch a fresh quote, sell all virtual holdings and leave entries paused |
+| New account | Keep the old account in history; requires no open virtual position |
+| Saved accounts | View and export previous practice accounts |
+| Advanced research | Open the original historical-testing tools in a separate window |
 
-```csv
-date,open,high,low,close
-2025-01-01,100,104,98,102
-2025-01-02,102,105,100,103
-```
+The model can stay in cash; it is not forced to trade for the sake of a demonstration.
+One account is monitored at a time. Close its virtual position before switching
+markets. The main page shows virtual value, gains/losses, cash, open-position status,
+source, last-received time and an activity log. Double-click an activity for fill details.
 
-This is a format example; provide at least 150 rows. Extra columns are allowed.
-Timestamps must be increasing, unique ISO dates/times, with consistent timezone
-format. Prices must be positive and OHLC ranges valid. Use your provider's exports.
-Adjust all OHLC columns consistently for corporate actions; do not combine an
-adjusted close with unadjusted open/high/low. No data service is connected.
+## Limits explained
 
-## ML and test methodology
+- **Starting practice money:** virtual USD, never a deposit or real balance.
+- **Maximum spend per trade:** fraction of available cash, limited to 1–25%. It is
+  not a maximum-loss guarantee.
+- **Account-drop halt:** observed account value falling 1–20% below its highest
+  observed value closes the virtual position and disables further entries.
+- **Practice position exits:** 2% price-drop stop, 4% price-rise target or model exit.
+- **Estimated costs:** 0.1% fee and 0.05% extra slippage each side. Public bid/ask
+  spread is included separately. These are assumptions, not the user's broker fees.
 
-Features are trailing log returns over 1, 3, 5, 10 and 20 bars plus 20-bar volatility.
-The target is whether the next bar closes above its own open. Standardization is
-fitted only on training examples, with at most the last 2,001 labeled training rows.
-The first 60% is training; the last 40% is testing. Training labels end before the
-test starts. Model weights remain frozen during the test. Decisions only use data
-through the closed bar, and execute at the **next bar open**.
+These settings are demonstration controls, not personal financial advice. Polling,
+price jumps and disconnects mean a loss may exceed a configured threshold.
 
-Model score ≥55% requests a long; ≤45% requests an exit; otherwise the position is
-unchanged. This is real small-scale ML, not an LLM. Scores are not calibrated
-confidence. The directional training target is simpler than the multi-bar trade
-outcome, and predictive accuracy alone does not establish profitable trading.
+## Closing, sleep and internet failures
 
-The trend rule buys when the 10-bar mean exceeds the 30-bar mean; otherwise exits.
-Neither strategy is validated for any real market. Defaults are demonstration
-settings, not personalized investment recommendations. Repeatedly selecting settings
-on the same test interval overfits it; reserve further untouched periods.
+Accounts, holdings, model weights, consumed signals and events are saved transactionally
+on this laptop in `~/TradingLabData/practice.sqlite3`. Reopening restores the latest
+account per market with entries paused. Click **Reconnect / resume** to fetch new data.
 
-## Execution assumptions
+**Nothing is monitored while the app is closed.** No exits are simulated during an
+outage or while the laptop sleeps. The next observed price may jump past a limit.
+Errors stop the connection and show an explanation; retry requires a user action.
+The value shown while disconnected is based on the last quote and may be stale.
 
-- One long position; no shorts, leverage, margin or derivatives.
-- Allocation is a fraction of cash at entry, not a guaranteed maximum loss.
-- Stops/targets use the slipped entry price. Gap-down stops fill at the open when
-  it is below the stop. Gap exits cannot re-enter on the same bar. Gap-up targets
-  conservatively fill at the target.
-- If both stop and target are touched within a bar, the stop executes first.
-- Drawdown halting checks opens/closes. Reported max drawdown uses closing equity;
-  intrabar drawdown may be worse. Gaps can exceed configured loss thresholds.
-- Any remaining position is liquidated with costs at the end of the test.
-- Buy-and-hold invests 100%, versus the strategy's chosen allocation; this reference
-  is not risk-matched.
-- No order book, spread curve, liquidity limits, partial fills, lot sizes, trading
-  calendars, FX pip/lot conventions, swaps/funding, dividends, taxes, delistings or
-  currency conversion. Slippage/fee inputs are simplified proportional costs.
-- Synthetic examples contain arbitrary daily dates including weekends.
-- Replay only animates a completed backtest. Metrics and trades show the whole run.
-- Reports stay on your laptop, unencrypted; nothing is sent to a remote service.
+Updates are saved before being displayed. Conflicting writers or a failed save stop
+the connection; the app never silently resets the balance. Open only one app instance
+per account. Saved history and reports are local and unencrypted.
 
-## Developer commands
+## The model and simulated fills
+
+The model is standard-library logistic regression, not an LLM. It learns from up to
+about 720 recent one-minute price bars, using trailing returns and volatility. The
+uncommitted last Kraken candle is excluded. At setup, all available closed-bar labels
+are used for training, then the model is frozen; entries wait for a newly closed candle.
+Model weights and the latest processed candle persist, preventing repeated entries
+from retries or restarts. Scores are not calibrated confidence or proven performance.
+
+For a new signal, a virtual buy uses the newly fetched ask plus slippage; a virtual
+sale uses the bid minus slippage. These are **receipt-time simulated fills**, not fills
+at the past candle open, and are not exchange orders. Fees are charged on both sides.
+Open-position value estimates the proceeds after exit costs. The agent polls roughly
+every 20 seconds after a response; demo mode advances a synthetic minute every 3 seconds.
+
+Quotes are marked by local receipt time (the ticker does not provide an exchange quote
+timestamp). Closed-candle age, local receipt age, OHLC validity and bid/ask checks reject
+obvious stale/invalid data but do not prove an exchange quote was freshly generated.
+No backfilled trades are invented after downtime. Only the latest closed-bar signal
+is considered on reconnect. Local protective exits run only at observed quotes.
+
+The simulated engine does not model order-book depth, partial fills, exchange sizes,
+market impact, funding, taxes or broker-specific execution. Virtual performance does
+not establish real-world returns. Demo dates/prices are generated, not market history.
+
+## Advanced tools and development
+
+The original historical engine is preserved in `engine.py`. Launch its interface with
+`python research_app.py` or the **Advanced research** button. See [RESEARCH.md](RESEARCH.md)
+for CSV requirements, historical execution assumptions and the 60/40 backtest split.
+That split applies to historical research, not to the forward practice model above.
+Old research history stays in `~/TradingLabData/runs.sqlite3` and is not migrated or erased.
 
 ```bash
-python run_test.py --market Crypto --strategy "ML classifier" --output report.json
-python run_test.py --market Forex --csv historical.csv --strategy "Trend rule"
 python -m unittest discover -s tests -v
+python run_test.py --market Crypto --output report.json
+python app.py
 ```
 
-| File | Purpose |
+| File | Responsibility |
 |---|---|
-| app.py | Desktop UI, background training, charts, saved runs |
-| engine.py | Data validation, model, signals, simulated fills |
-| run_test.py | Command-line runner |
-| tests/test_engine.py | Deterministic correctness tests |
-| START-WINDOWS.bat | Windows launcher |
+| `app.py` | Guided setup, practice dashboard, controls and background price polling |
+| `practice.py` | Virtual-account state, ML decisions, sampled exits and atomic persistence |
+| `market_data.py` | Read-only Kraken adapter and labeled deterministic demos |
+| `research_app.py` | Original advanced historical interface |
+| `engine.py` | Shared model and historical simulation engine |
 
-## Remaining work toward autonomous live trading
+## Project instructions
 
-Select an actual instrument and eligible broker/exchange; implement its data and
-sandbox/paper execution adapter; persist positions/orders; reconcile fills after
-restart; handle stale prices, disconnects, minimum sizes and duplicate orders;
-then evaluate independent real data and forward paper trading. Live activation
-requires an explicit decision and broker credentials configured locally. No live
-order endpoint or credential fields are present in this version.
+Read [AGENTS.md](AGENTS.md), [PRD.md](PRD.md),
+[ARCHITECTURE-ESSENTIALS.md](ARCHITECTURE-ESSENTIALS.md),
+[ARCHITECTURE.md](ARCHITECTURE.md) and [DECISIONS.md](DECISIONS.md).
+[CLAUDE.md](CLAUDE.md) points Claude to the same shared instructions.
 
-With an intermittently running laptop, a future live connector must use supported
-broker-hosted protective orders and reconcile on reopening. A local stop cannot
-protect an account while the computer is asleep or disconnected.
+## What remains before real trading
 
-## For coding agents and contributors
+Actual account eligibility and broker selection; authenticated paper/sandbox order
+integration; exchange fill reconciliation, lot sizes and durable external order IDs;
+independent strategy evaluation; then explicit user-authorized live activation and
+broker-hosted protection for laptop downtime. No “connect account” button pretends
+these unfinished integrations exist.
 
-Start with [AGENTS.md](AGENTS.md). These documents describe the project and keep
-future agents working from shared requirements:
+## Data-provider references
 
-| Document | Purpose |
-|---|---|
-| [PRD.md](PRD.md) | Product goal, scope, acceptance criteria and milestones |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Current components, data flow, state and proposed evolution |
-| [ARCHITECTURE-ESSENTIALS.md](ARCHITECTURE-ESSENTIALS.md) | Quick technical orientation and invariants |
-| [AGENTS.md](AGENTS.md) | Shared coding, verification and handoff instructions |
-| [CLAUDE.md](CLAUDE.md) | Claude entry point pointing to the shared guidance |
-| [DECISIONS.md](DECISIONS.md) | Important decisions, reasons, alternatives and trade-offs |
+Implementation checked against official documentation:
+[Kraken OHLC](https://docs.kraken.com/api-reference/market-data/get-ohlc-data) and
+[Kraken ticker](https://docs.kraken.com/api-reference/market-data/get-ticker-information).
 
-Record material decisions with the provided template in the same change. Preserve
-older records and explicitly supersede them when a decision changes. These files
-guide tools that read them; they do not guarantee automatic loading by every agent.
+## Verification for this change
+
+27 automated checks passed, including three Tk desktop flow tests in a Linux virtual
+display. The desktop checks exercised setup, start, pause, closing a position, JSON
+export, persisted restoration, small-screen scrolling and cancellation of a pending
+entry after Pause. Onboarding and dashboard screens were visually inspected. An
+actual Kraken public-data request also completed successfully.
+
+These checks validate software behavior, not trading profitability. The Windows
+launcher and appearance have not been tested on the user's laptop. Desktop tests
+skip with an explicit reason when the test environment has no Tk display.

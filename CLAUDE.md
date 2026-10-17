@@ -10,8 +10,9 @@ Then read:
 3. [ARCHITECTURE.md](ARCHITECTURE.md) — implementation and proposed future boundaries.
 4. [DECISIONS.md](DECISIONS.md) — material choices, reasons and change history.
 
-This repository currently contains an offline historical trading simulator. Do not
-present it as a live trading agent or activate real-money trading from the build goal.
+This repository contains a beginner virtual-money practice desk and advanced historical
+research tools. Public Bitcoin prices are read-only; no broker orders are sent. Do not
+present practice as real-money trading or activate real funds from the build goal.
 Append material decision summaries using the shared template and report actual
 verification results when handing work back. User task instructions and applicable
 higher-priority rules take precedence over repository guidance.

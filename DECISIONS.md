@@ -112,3 +112,59 @@ keep prior records and link replacements rather than silently rewriting history.
 - **Evidence:** Actual checks/measurements, commit or PR; say if not yet verified.
 - **Revisit when:** Conditions that would justify changing this choice.
 ```
+
+## ADR-006 — Make guided virtual practice the default experience
+
+- **Date:** 2026-10-17
+- **Status:** Implemented; extends the historical-first foundation in ADR-001.
+- **Context:** User clarified that the app is for people who know no trading basics,
+  then delegated the implementation. The research-first screen required too much knowledge.
+- **Decision:** Replace the default screen with onboarding and a practice dashboard;
+  preserve the old interface as `research_app.py`, accessible under Advanced research.
+- **Rationale:** Users can try the agent without importing data or choosing a model.
+  Familiar controls explain waiting, spending limits, holdings and gains/losses.
+- **Alternatives:** Only restyle the research dashboard; rebuild a hosted web product.
+- **Consequences:** Keeps the lightweight laptop stack and original research history.
+  Entry pause and full position close are separate. No fake broker-connect button is added.
+- **Evidence:** 27 tests passed including three Tk flow tests in a Linux virtual display;
+  onboarding/dashboard visually inspected. Windows user-laptop acceptance remains unverified.
+- **Revisit when:** Real account onboarding or cross-device access is requested.
+
+## ADR-007 — Use read-only Bitcoin data for the first forward practice feed
+
+- **Date:** 2026-10-17
+- **Status:** Implemented for local virtual fills; no broker account integration.
+- **Context:** A beginner needs automatic prices, while actual broker/account choice
+  remains unresolved. One concrete data adapter is more testable than nominal all-market support.
+- **Decision:** Offer Kraken public BTC/USD OHLC/ticker alongside clearly separate
+  offline demos. Forex/Stocks remain labeled demos. Reject feed failures without fallback.
+- **Rationale:** Public reads need no secrets. Official documentation describes the
+  unfinished candle and quote fields needed for closed-bar signals and receipt-time fills.
+- **Alternatives:** Require CSV; collect credentials before practice; claim generic
+  stock/forex execution without implementing the required providers.
+- **Consequences:** This is not a broker recommendation or eligibility assertion.
+  Public access depends on network/provider. Receipt time does not prove exchange quote
+  freshness. Simulated fills have no liquidity or actual execution guarantees.
+- **Evidence:** Actual public-data fetch succeeded; parser tests exclude the unfinished
+  candle and reject stale candles/bad quotes. Official references are in architecture.
+- **Revisit when:** Choosing an actual venue or additional verified market data providers.
+
+## ADR-008 — Persist practice state and separate entry pause from shutdown
+
+- **Date:** 2026-10-17
+- **Status:** Implemented for local practice only.
+- **Context:** Intermittent laptop use and retries must not silently reset holdings,
+  duplicate entries or treat a closed app as if it kept monitoring the market.
+- **Decision:** Atomically save whole account/event state with optimistic revisions.
+  Persist weights/processed candle; restore paused. Pause new entries keeps exits active
+  only while connected. Manual close fetches a fresh quote. Invalidate late worker results.
+- **Rationale:** Gives understandable controls and prevents common local consistency errors.
+- **Alternatives:** Memory-only balances; automatic resume; duplicate signals on every
+  poll; mark positions closed during shutdown without a fresh quote.
+- **Consequences:** No background monitoring or invented catch-up fills. A stale/offline
+  valuation can differ from the next quote. One account is monitored at a time; open
+  virtual holdings must close before switching markets. External order recovery is future work.
+- **Evidence:** Tests cover restart holdings/model state, repeated candles, pause/exit,
+  failed-save rollback and stale-writer rejection. Tk flow tests verified that a
+  pending entry is discarded after Pause, and exercised close/export/restoration.
+- **Revisit when:** Multiple concurrently monitored accounts or actual broker orders are added.

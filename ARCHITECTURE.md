@@ -1,86 +1,115 @@
 # Architecture
 
-Updated: 2026-10-17. Describes the existing implementation; future components are
-explicitly marked proposed. For brief invariants see
-[ARCHITECTURE-ESSENTIALS.md](ARCHITECTURE-ESSENTIALS.md).
+Updated: 2026-10-17. Current beginner-practice change; proposed integrations are marked.
 
-## Current modules
+## Modules and boundaries
 
-| Module | Responsibility | Boundary |
+| File | Owns | Does not own |
 |---|---|---|
-| `engine.py` | Bar/config models, CSV validation, synthetic examples, features, logistic model, signals, simulation | No UI, network requests or broker orders |
-| `app.py` | Tk interface, market workspaces, background simulation, chart/replay, report saving/export | Calls the engine; UI operations stay on the Tk thread |
-| `run_test.py` | Headless simulation and JSON report | Shares the engine; CLI output is not automatically saved into GUI history |
-| `tests/test_engine.py` | Deterministic accounting, fill, risk, data and leakage checks | No network or real account dependency |
-| `START-WINDOWS.bat` | Launch via Python 3, show an error if launch fails | No installation or background service |
+| `app.py` | Tk onboarding/dashboard, polling, epoch cancellation, persistence handoff | Real orders or secrets |
+| `practice.py` | Account state, local ML decisions, virtual fills, sampled exits, SQLite transactions | Network calls or Tk widgets |
+| `market_data.py` | Public OHLC/ticker reads, snapshot validation, synthetic demo generation | Authenticated exchange endpoints |
+| `research_app.py` | Original historical UI, run exports, research history | Forward execution |
+| `engine.py` | Shared features/model and original historical simulator | Network, Tk or broker account state |
+| `run_test.py` | Historical CLI | Practice account persistence |
 
-## Data flow
+## Beginner flow and concurrency
 
-1. A market workspace starts with a deterministic synthetic OHLC series, or the user
-   imports a CSV. Validate increasing unique ISO timestamps and positive OHLC ranges.
-2. The UI snapshots bars, settings, market and source before starting a worker thread.
-3. `simulate` uses the first 60% of bars as the training segment and the remaining
-   40% as the test segment. The ML strategy fits once; the trend rule requires no fit.
-4. A signal from the previous closed bar is applied at the current test bar's open.
-   Fills, fees, risk exits and equity are tracked under the documented OHLC assumptions.
-5. The worker queues a result; the Tk thread polls, stores and renders it. Do not call
-   Tk widgets from the worker. A failed save is shown separately from a successful test.
-6. Completed UI runs are stored in SQLite; users can export the full JSON report.
+Onboarding creates a saved virtual account with market, mode, starting balance,
+allocation fraction and peak-relative drop threshold. No model or CSV choice is needed.
+Start saves a running state, then begins polling. A worker uses a copy of account state
+to fetch a snapshot and compute a candidate update. The main thread accepts the result
+only if its epoch/market still matches, saves it atomically, and then displays it.
+Pause, market change, close request and shutdown invalidate pending work. In-flight
+network reads are bounded by timeouts; discarded results cannot trade after a control
+change. Tk is never updated from the worker.
 
-## Model and strategy
+Only one practice account is monitored at a time. Switching markets requires a flat
+current account. Paused entries can still have existing positions, so monitoring and
+exit checks continue until disconnected. A provider error sets attention state and
+stops polling; reconnect is explicit. Closing the app stops all monitoring.
 
-`features` uses five trailing log returns and 20-bar volatility. `Model` implements
-L2-regularized logistic regression with training-only mean/standard-deviation scaling.
-Training uses at most the last 2,001 labeled examples before the test boundary. Labels
-represent the following bar's open-to-close direction. Weights are frozen in testing.
-A score at least .55 buys, at most .45 sells, otherwise holds. Scores are uncalibrated.
-The alternative strategy compares 10- and 30-bar closing-price means.
+## Public market data
 
-No external AI provider or LLM is involved. The directional target does not directly
-optimize multi-bar trading returns. Full methodology and limitations are in README.
+Only BTC/USD via Kraken public OHLC and ticker is integrated. Calls use fixed public
+GET endpoints, timeouts and a response-size limit; no credential or order endpoint.
+Drop the final OHLC row because Kraken documents it as the uncommitted current frame.
+Require at least 150 closed rows with valid sorted ISO timestamps and positive OHLC.
+Validate finite bid/ask, non-crossed quote, spread no greater than 5%, receipt age no
+more than 25 seconds and closed-candle age no more than 180 seconds. A small forward
+clock tolerance is allowed. Never substitute synthetic data after a provider error.
 
-## Simulation and risk semantics
+Ticker age uses local receipt time; the ticker itself lacks an exchange-generated
+quote timestamp. Candle freshness and receipt checks cannot fully prove quote freshness.
+The snapshot carries explicit source, symbol and synthetic flags; account validation
+rejects incompatible snapshots. Polling happens about 20 seconds after completion,
+not tick-by-tick. Offline demos generate deterministic accelerated minute bars.
 
-Positions are long/flat with fractional units in the instrument's quote currency.
-Allocation caps the cash spent at entry, including entry fees. Both sides receive
-fee and slippage adjustments. Gap-down stops use the lower open; target gaps use a
-conservative target fill. If a bar touches both stop and target, the stop wins.
-A gap exit cannot immediately re-enter on that bar. Remaining positions are closed
-at test end. Realized trade P/L includes entry and exit fees.
+Official references: [OHLC](https://docs.kraken.com/api-reference/market-data/get-ohlc-data)
+and [ticker](https://docs.kraken.com/api-reference/market-data/get-ticker-information).
 
-Drawdown halting checks opening and closing equity; reported max drawdown is based
-on closes. Gaps and intrabar moves can exceed the configured threshold. These limits
-are not guarantees. The buy-and-hold reference invests all capital and is not risk-matched.
+## Forward practice model and fills
 
-## State and persistence
+Reuse the existing L2 logistic regression and trailing-return/volatility features.
+On first connection train on available closed bars, with labels contained in those
+bars, then mark the latest known candle consumed. First possible entry is on a later
+closed candle. Weights remain frozen in the saved account. Every candle is consumed
+at most once, including when paused. On reconnect only the latest candle is considered;
+no missed historical fills are fabricated.
 
-- In-memory market state: bars, source label, latest result. Current settings are
-  shared UI controls; each completed report retains its actual config.
-- GUI history: `~/TradingLabData/runs.sqlite3`, table `runs` with `id`, `created`,
-  `market`, `source`, and complete JSON `report`.
-- GUI report metadata includes UTC creation time and app version. CLI reports include
-  market/source but do not currently include identical creation/version metadata.
-- Inputs are not automatically restored on restart. Saved runs can be exported; they
-  are not reloaded into the current chart. Reports are local and unencrypted.
-- Chart rendering is sampled for large series; exported curves remain complete.
-  The trade table displays the last 3,000 events; exports contain every event.
+Scores ≥.55 request entry, ≤.45 request exit, otherwise hold. Scores are uncalibrated
+and no market edge has been established. Buy at observed ask with .05% slippage and
+.1% fee; sell at observed bid with the same assumptions. All trades are virtual and
+use receipt-time quotes, not past candle opens. One fractional long position per account.
 
-## Proposed evolution — not implemented
+At every accepted snapshot, check account drawdown, then position stop/target, then
+model action for a new candle. A protective exit cannot re-enter in the same update.
+Loss halt closes at observed bid and permanently disables entries for that account.
+Pause blocks entries while allowing stop/target/model exits when connected. Manual
+close requires a fresh compatible snapshot and leaves entries paused. Gaps and missed
+polls can exceed configured thresholds. No depth, partial fills, market impact, lot
+sizes, leverage or real exchange order states are modeled.
 
-Introduce a data-provider boundary and a broker adapter only after selecting a venue.
-Keep historical simulation distinct from forward paper and live execution. Future
-execution needs durable order IDs, order/fill/position state, reconciliation on startup,
-retry/idempotency handling, stale-data checks, market-specific size/session rules and
-failure visibility. Broker-hosted protection must address intermittent laptop operation.
+## Storage and restart
 
-Do not reuse an optimistic simulated fill as proof that a broker order succeeded.
-Credentials must stay out of source, reports and logs. Document the selected adapter
-and its verified limitations in a new decision record before presenting it as supported.
+`~/TradingLabData/practice.sqlite3` stores JSON account state, ID, market, updated UTC
+and revision. State contains cash, units, cost basis, entry, fees, realized P/L, peak,
+last quote/candle, model weights, demo step, status, events and recent equity points.
+Use whole-state transactions: state and event changes either both commit or neither.
+Optimistic revision checks block stale writers from overwriting newer state. The UI
+publishes a candidate only after successful save. Conflicts/storage errors stop polling.
 
-## Verification and changes
+Restart loads the latest account per market, retaining holdings/model/consumed candle
+but forcing a paused state (or halted if already halted). It never automatically resumes.
+History keeps prior accounts; reports export explicit practice/source/cost metadata.
+Snapshots contain no real account information. Data is local and unencrypted.
 
-Run `python -m unittest discover -s tests -v` for engine changes. Add focused tests
-for changed behavior, particularly costs, timing, leakage, risk exits and restarts.
-For UI changes launch the app and exercise affected interactions where possible;
-otherwise explicitly report that GUI behavior was not verified. Update architecture
-and decision records alongside meaningful changes, without inventing test evidence.
+Equity history retains the latest 3,000 observations; activity keeps all events in the
+saved account, while the dashboard displays the most recent 150. Long-running state
+size is a future scaling concern. There is no migration of research run history.
+
+## Advanced historical research (unchanged engine)
+
+`research_app.py` is the former `app.py`; it retains CSV validation, synthetic examples,
+60/40 chronological train/test, training-only scaling and frozen-model backtesting.
+Signals use previous closed bars and fill next open with documented costs/gap rules.
+Historical ambiguity resolves stop before target. Test-end liquidation allows cash
+reconciliation. Historical drawdown reports close-based equity, not intrabar peaks.
+See [RESEARCH.md](RESEARCH.md) for full assumptions and command-line usage.
+Research GUI runs stay in `~/TradingLabData/runs.sqlite3`. CLI exports remain separate.
+
+## Future broker execution — not implemented
+
+Choose an eligible venue with the user, then add a distinct sandbox/account execution
+adapter. It needs external order/fill IDs, reconciliation on restart, idempotency,
+minimum size/session rules, stale-data handling and broker-hosted protection for downtime.
+A local simulated fill must never be interpreted as evidence of a filled broker order.
+Live activation and credentials must remain explicit and separate from practice setup.
+
+## Verification
+
+Run `python -m unittest discover -s tests -v`. Tests cover historical behavior, virtual
+cash flows, sampled halts, pause semantics, source/age checks, no repeated candle
+entry, model freezing, restart preservation, revision conflicts and failed-save rollback.
+Exercise onboarding, dashboard, source changes, pause/close and restoration with a
+real Tk display where available; state unverified platform behavior honestly.
