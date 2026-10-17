@@ -58,7 +58,7 @@ adjusted close with unadjusted open/high/low. No data service is connected.
 
 Features are trailing log returns over 1, 3, 5, 10 and 20 bars plus 20-bar volatility.
 The target is whether the next bar closes above its own open. Standardization is
-fitted only on training examples, with at most the last 2,000 labeled training rows.
+fitted only on training examples, with at most the last 2,001 labeled training rows.
 The first 60% is training; the last 40% is testing. Training labels end before the
 test starts. Model weights remain frozen during the test. Decisions only use data
 through the closed bar, and execute at the **next bar open**.
@@ -121,3 +121,21 @@ order endpoint or credential fields are present in this version.
 With an intermittently running laptop, a future live connector must use supported
 broker-hosted protective orders and reconcile on reopening. A local stop cannot
 protect an account while the computer is asleep or disconnected.
+
+## For coding agents and contributors
+
+Start with [AGENTS.md](AGENTS.md). These documents describe the project and keep
+future agents working from shared requirements:
+
+| Document | Purpose |
+|---|---|
+| [PRD.md](PRD.md) | Product goal, scope, acceptance criteria and milestones |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Current components, data flow, state and proposed evolution |
+| [ARCHITECTURE-ESSENTIALS.md](ARCHITECTURE-ESSENTIALS.md) | Quick technical orientation and invariants |
+| [AGENTS.md](AGENTS.md) | Shared coding, verification and handoff instructions |
+| [CLAUDE.md](CLAUDE.md) | Claude entry point pointing to the shared guidance |
+| [DECISIONS.md](DECISIONS.md) | Important decisions, reasons, alternatives and trade-offs |
+
+Record material decisions with the provided template in the same change. Preserve
+older records and explicitly supersede them when a decision changes. These files
+guide tools that read them; they do not guarantee automatic loading by every agent.
