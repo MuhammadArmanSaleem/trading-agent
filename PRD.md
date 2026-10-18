@@ -1,14 +1,16 @@
 # Product requirements — Trading Lab
 
-Updated: 2026-10-17. Owner: Muhammad Arman Saleem.
+Updated: 2026-10-18.
 
 ## Goal and users
 
-Arman is building a trading application for his younger brother. The eventual goal
-is software that can execute a defined strategy on the user's behalf, with visible
-results and controls. Profitability is an empirical question, not a promised feature.
-The user requested one application with separate Crypto, Forex and Stocks sections.
-It should run on a laptop and need not run continuously.
+Trading Lab targets beginner traders and nontechnical users who need guided setup,
+plain-language explanations and clear controls across Crypto, Forex and Stocks.
+The long-term goal is to execute defined strategies on behalf of users with visible
+results and configurable limits. Profitability is not a promised feature.
+The product supports local desktop use without requiring continuous operation.
+The current research release is a technical foundation; the guided beginner experience
+is being developed separately.
 
 ## Confirmed constraints and unresolved choices
 
@@ -18,9 +20,9 @@ It should run on a laptop and need not run continuously.
 | Markets | Separate Crypto / Forex / Stocks sections requested |
 | Runtime | Local laptop; intermittent use is acceptable |
 | Broker, exchange, instrument | Not selected |
-| Trading strategy | User has not specified one |
-| Existing implementation | Python/Tk desktop simulator; an implementation choice, not a user-mandated stack |
-| Real funds, limits, live activation | Not configured or authorized by the initial build request |
+| Trading strategy | Production strategy not selected |
+| Existing implementation | Python/Tk desktop simulator; an implementation choice, not a fixed product requirement |
+| Real funds, limits, live activation | Not configured; explicit activation required |
 | Computer specs and account eligibility | Not established |
 
 ## Current release: historical research
@@ -50,7 +52,7 @@ reports persist in SQLite. The original autonomous-trading goal is not complete.
 
 Evidence at implementation baseline `8c8f6e7`: 10 engine tests passed, Python files
 compiled, and the CLI smoke run completed. Windows GUI launch, layout and interaction
-have not been verified on the user's laptop. Automated tests do not establish returns.
+have not been verified on target Windows devices. Automated tests do not establish returns.
 
 ## Delivery milestones
 
