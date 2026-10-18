@@ -4,16 +4,15 @@ This file records **what was decided and why**, so future contributors and the o
 can understand trade-offs. It is not a transcript or a private reasoning log.
 
 Entries 001–004 retrospectively document choices made in implementation baseline
-`8c8f6e7`. They are implementation choices, not claims that the user prescribed the
-stack or approved live trading. Dates use YYYY-MM-DD. Append material new entries;
+`8c8f6e7`. They document implementation choices and do not imply live-trading authorization. Dates use YYYY-MM-DD. Append material new entries;
 keep prior records and link replacements rather than silently rewriting history.
 
 ## ADR-001 — Build historical simulation before broker execution
 
 - **Date:** 2026-10-17
 - **Status:** Implemented; live execution remains unimplemented.
-- **Context:** User wants an autonomous trading application with multiple market
-  sections, but has no selected venue, instrument or trading rules.
+- **Context:** The product requires automated trading across multiple market
+  sections; the venue, instruments and production trading rules are not yet selected.
 - **Decision:** Deliver a clearly labeled offline testing foundation first.
 - **Rationale:** It makes strategy behavior and accounting inspectable without
   inventing broker access or executing untested orders.
@@ -28,22 +27,22 @@ keep prior records and link replacements rather than silently rewriting history.
 
 - **Date:** 2026-10-17
 - **Status:** Implemented; desktop user acceptance pending.
-- **Context:** User prefers laptop execution and does not require continuous operation.
+- **Context:** The product targets local desktop execution without continuous operation.
 - **Decision:** Use Python, Tk, standard-library ML code and SQLite report history.
 - **Rationale:** Small installation surface, no hosted service or paid inference API,
   and no GPU requirement for the implemented model.
 - **Alternatives:** Hosted web app; separate frontend/backend; large local AI model.
 - **Consequences:** UI styling is limited by Tk, Python/Tk must be installed, and no
-  activity occurs when closed. Laptop specs have not been verified. The Python
-  application was an implementation choice, not an explicit user stack requirement.
+  activity occurs when closed. Minimum hardware requirements have not been benchmarked. The Python
+  application was an implementation choice, not a fixed product requirement.
 - **Evidence:** Python compilation and CLI run succeeded; Windows GUI not exercised.
-- **Revisit when:** User needs browser/mobile access, deployment or background operation.
+- **Revisit when:** Product requirements expand to browser/mobile access, deployment or background operation.
 
 ## ADR-003 — Compare simple ML with a transparent trend baseline
 
 - **Date:** 2026-10-17
 - **Status:** Implemented; not validated for real trading.
-- **Context:** User requested AI but supplied no defined strategy or training dataset.
+- **Context:** AI-assisted decisions are a product requirement; a production strategy and training dataset are not yet defined.
 - **Decision:** Add local logistic regression and a 10/30-bar trend rule. Use a
   chronological train/test split and frozen model parameters during testing.
 - **Rationale:** Provides actual ML functionality and a simpler comparison while
@@ -60,7 +59,7 @@ keep prior records and link replacements rather than silently rewriting history.
 
 - **Date:** 2026-10-17
 - **Status:** Implemented with documented limitations.
-- **Context:** User requested separate market sections before selecting any broker.
+- **Context:** The product requires separate market sections; no broker has been selected.
 - **Decision:** Share long/flat, unleveraged fractional-unit accounting; charge both
   sides' costs; execute previous-close signals next open; make stops win ambiguous
   bars; model gap-down stops at the available open; prohibit same-bar gap re-entry.
@@ -79,15 +78,14 @@ keep prior records and link replacements rather than silently rewriting history.
 
 - **Date:** 2026-10-17
 - **Status:** Implemented in this documentation change.
-- **Context:** User supplied a screenshot of six project files and expects different
-  coding agents to continue development. The screenshot's sixth label is “Empty file”;
-  its intended meaning is not verifiable from the screenshot alone.
+- **Context:** Multiple coding agents need a shared product specification,
+  architecture reference, contributor instructions and decision history.
 - **Decision:** Add PRD.md, ARCHITECTURE.md, ARCHITECTURE-ESSENTIALS.md, AGENTS.md,
   CLAUDE.md and this DECISIONS.md. Treat AGENTS.md as the shared rules and CLAUDE.md
   as an entry point that directs Claude to those rules.
 - **Rationale:** Separate product requirements, detailed implementation, quick
-  orientation, agent behavior and decision history. Give the sixth file a useful
-  purpose consistent with the user's suggestion instead of leaving a blank file.
+  orientation, agent behavior and decision history. Maintain an explicit decision log
+  so contributors can understand the rationale behind significant changes.
 - **Alternatives:** Duplicate rules for each agent; one large undifferentiated document;
   leave an unexplained empty file.
 - **Consequences:** Docs must be maintained with meaningful changes. The files guide
@@ -117,8 +115,8 @@ keep prior records and link replacements rather than silently rewriting history.
 
 - **Date:** 2026-10-17
 - **Status:** Implemented; extends the historical-first foundation in ADR-001.
-- **Context:** User clarified that the app is for people who know no trading basics,
-  then delegated the implementation. The research-first screen required too much knowledge.
+- **Context:** The target audience includes beginners and nontechnical users.
+  The research-first screen required too much trading and configuration knowledge.
 - **Decision:** Replace the default screen with onboarding and a practice dashboard;
   preserve the old interface as `research_app.py`, accessible under Advanced research.
 - **Rationale:** Users can try the agent without importing data or choosing a model.
@@ -127,7 +125,7 @@ keep prior records and link replacements rather than silently rewriting history.
 - **Consequences:** Keeps the lightweight laptop stack and original research history.
   Entry pause and full position close are separate. No fake broker-connect button is added.
 - **Evidence:** 27 tests passed including three Tk flow tests in a Linux virtual display;
-  onboarding/dashboard visually inspected. Windows user-laptop acceptance remains unverified.
+  onboarding/dashboard visually inspected. Target-device Windows acceptance remains unverified.
 - **Revisit when:** Real account onboarding or cross-device access is requested.
 
 ## ADR-007 — Use read-only Bitcoin data for the first forward practice feed

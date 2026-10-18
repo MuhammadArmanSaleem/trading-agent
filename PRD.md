@@ -1,16 +1,16 @@
 # Product requirements — Trading Lab
 
-Updated: 2026-10-17. Owner: Muhammad Arman Saleem.
+Updated: 2026-10-18.
 
 ## Audience and outcome
 
-Build for Arman's younger brother and people who do not know the basics of trading.
+Target beginner traders and nontechnical users with little or no trading experience.
 Users should not need CSV files, API knowledge or model selection to try the agent.
 The eventual goal is guided, autonomous trading on the user's behalf with clear
 controls and understandable results. Profitability is not a promised feature.
 
 Confirmed: separate Crypto, Forex and Stocks sections; local laptop use; continuous
-operation is not required. The user delegated routine design/implementation decisions.
+operation is not required.
 Broker account, live instrument/limits, eligibility and real-money activation remain
 unresolved. Choosing Bitcoin for read-only price practice does not select a real broker.
 
@@ -66,5 +66,5 @@ from automated tests and developer-environment UI checks.
 
 Current change: 27 tests passed (including three actual Tk flow checks in a Linux
 virtual display), onboarding/dashboard visually inspected, and real Kraken data
-retrieved. User-laptop/Windows acceptance and profitable real-market performance
+retrieved. Target-device Windows acceptance and profitable real-market performance
 have not been established. Tests are software correctness evidence only.

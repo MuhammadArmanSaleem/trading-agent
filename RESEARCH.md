@@ -1,12 +1,18 @@
 # Advanced historical research
 
-A lightweight local desktop research app for Arman's multi-market trading project.
+A lightweight local desktop research app for exploring automated trading across multiple markets.
 Separate **Crypto, Forex and Stocks** workspaces; a locally trained machine-learning
 classifier, a trend-rule baseline, historical simulation and saved reports.
 
 **This research window is an offline historical simulator, not a live trading bot.** It cannot
 place orders or obtain current prices. Included prices are synthetic demonstrations,
 not evidence of trading profit. No broker account or paid API is required.
+
+## Target audience
+
+Beginner traders and nontechnical users seeking guided setup, plain-language
+explanations and clear practice-trading controls. Advanced research tools support
+strategy evaluation; they do not assume every user has trading or coding expertise.
 
 ## Windows setup
 

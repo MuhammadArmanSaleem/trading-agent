@@ -31,6 +31,14 @@ live trading, external account changes or deployment.
 - The broad request to build a bot is not authorization to activate real-money trading.
   Keep credentials and any future live activation explicit and separate from testing.
 
+## Public documentation standards
+
+- Describe the product, target audience, requirements and engineering decisions professionally.
+- Do not include personal or family context, private conversations, or biographical details
+  in documentation, code comments, decision records, commit messages or pull requests.
+- Express audience needs as user personas and product requirements. Include personal
+  attribution only when explicitly requested for publication; retain valid project URLs.
+
 ## Verification
 
 - Engine changes: run `python -m unittest discover -s tests -v` and add focused tests

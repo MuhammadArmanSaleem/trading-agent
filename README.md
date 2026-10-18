@@ -7,6 +7,12 @@ API keys or model configuration are needed in the main flow.
 **This release uses virtual money only. It cannot trade real funds.** It includes
 an actual small, locally trained ML model, but has no established profitable edge.
 
+## Target audience
+
+Beginner traders and nontechnical users seeking guided setup, plain-language
+explanations and clear practice-trading controls. Advanced research tools support
+strategy evaluation; they do not assume every user has trading or coding expertise.
+
 ## Start on Windows
 
 1. Install [Python 3.10+](https://www.python.org/downloads/windows/) with Tcl/Tk enabled.
@@ -153,5 +159,5 @@ entry after Pause. Onboarding and dashboard screens were visually inspected. An
 actual Kraken public-data request also completed successfully.
 
 These checks validate software behavior, not trading profitability. The Windows
-launcher and appearance have not been tested on the user's laptop. Desktop tests
+launcher and appearance have not been tested on target Windows devices. Desktop tests
 skip with an explicit reason when the test environment has no Tk display.
