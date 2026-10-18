@@ -1,271 +1,337 @@
-"""Trading Lab: local multi-market research desktop application."""
-import csv
+"""Beginner-first practice desk. Python + Tk; virtual money only."""
+import copy
 import json
 import queue
-import sqlite3
+import subprocess
+import sys
 import threading
+import time
 import tkinter as tk
-from tkinter import ttk, filedialog, messagebox
-from datetime import datetime, timezone
+from tkinter import ttk, messagebox, filedialog
 from pathlib import Path
-from engine import Config, sample, read_csv, simulate
+from practice import Account, Store, transact
+from market_data import demo_snapshot, kraken_snapshot
 
-BG, PANEL, FG, MUTED, ACCENT = '#0b1220', '#142034', '#e8eff8', '#94a6bd', '#4cdbc2'
-DATA = Path.home() / 'TradingLabData'
+BG='#0b1220'; PANEL='#152238'; FG='#edf3fa'; MUTED='#a7b6cb'; GREEN='#63e0b8'; AMBER='#ffc77a'
+DATA=Path.home()/'TradingLabData'
 
 class App:
-    def __init__(self, root):
-        self.root = root
-        root.title('Trading Lab • Local research desk')
-        root.geometry('1180x800')
-        root.minsize(960,700)
-        root.configure(bg=BG)
-        self.busy = False
-        self.q = queue.Queue()
-        self.replay_id = None
-        self.states = {m:dict(bars=sample(m),source='SYNTHETIC DEMO — not market data',result=None) for m in ('Crypto','Forex','Stocks')}
-        self.market = tk.StringVar(value='Crypto')
-        self.strategy = tk.StringVar(value='ML classifier')
-        self.source = tk.StringVar()
-        self.status = tk.StringVar(value='Offline research only. No exchange account, orders, or live price feed connected.')
-        style = ttk.Style()
-        style.theme_use('clam')
-        style.configure('.',background=PANEL,foreground=FG,fieldbackground=BG,font=('Segoe UI',10))
-        style.configure('TButton',padding=(12,8))
-        style.map('TButton',background=[('active','#263d58')])
-        style.configure('Treeview',background=BG,fieldbackground=BG,foreground=FG,rowheight=26)
+    def __init__(self,root,store=None,fetcher=None):
+        self.root=root
+        self.store=store or Store(DATA/'practice.sqlite3')
+        self.fetcher=fetcher or self.fetch
+        self.accounts={m:self.store.latest(m) for m in ('Crypto','Forex','Stocks')}
+        self.market='Crypto';self.connected=False;self.busy=False;self.epoch=0
+        self.next_fetch=0;self.q=queue.Queue();self.closed=False
+        root.title('Trading Lab | Practice first')
+        root.geometry('1120x780');root.minsize(860,620);root.configure(bg=BG)
+        root.protocol('WM_DELETE_WINDOW',self.close_app)
+        style=ttk.Style(root);style.theme_use('clam')
+        style.configure('.',background=PANEL,foreground=FG,font=('Segoe UI',10),fieldbackground=BG)
+        style.configure('TButton',padding=(12,9))
+        style.map('TButton',background=[('active','#294260'),('disabled','#1a2638')],foreground=[('disabled','#6e7f97')])
+        style.configure('Treeview',background=BG,fieldbackground=BG,foreground=FG,rowheight=28)
         style.configure('Treeview.Heading',background=PANEL,foreground=MUTED)
-        style.configure('TCombobox',fieldbackground=BG)
-        top = tk.Frame(root,bg=BG)
-        top.pack(fill='x',padx=24,pady=(20,10))
-        tk.Label(top,text='TRADING LAB',fg=ACCENT,bg=BG,font=('Segoe UI',23,'bold')).pack(side='left')
-        tk.Label(top,text='HISTORICAL SIMULATOR  /  NO REAL MONEY',fg=MUTED,bg=BG,font=('Segoe UI',10,'bold')).pack(side='right')
-        nav = tk.Frame(root,bg=BG)
-        nav.pack(fill='x',padx=24,pady=4)
-        self.market_buttons=[]
-        for m in self.states:
-            b = ttk.Radiobutton(nav,text=m,variable=self.market,value=m,command=self.switch)
-            b.pack(side='left',padx=(0,20))
-            self.market_buttons.append(b)
-        ttk.Button(nav,text='Saved runs',command=self.history).pack(side='right')
-        tk.Label(root,textvariable=self.source,bg=BG,fg='#f9bc67',anchor='w',font=('Segoe UI',10)).pack(fill='x',padx=24,pady=7)
-        main = tk.Frame(root,bg=BG)
-        main.pack(fill='both',expand=True,padx=24)
-        left = tk.Frame(main,bg=PANEL,width=235)
-        left.pack(side='left',fill='y',padx=(0,16))
-        left.pack_propagate(False)
-        tk.Label(left,text='EXPERIMENT SETTINGS',bg=PANEL,fg=MUTED,font=('Segoe UI',10,'bold')).pack(anchor='w',padx=14,pady=(14,8))
-        ttk.Combobox(left,textvariable=self.strategy,values=['ML classifier','Trend rule'],state='readonly',width=23).pack(padx=14,pady=6)
-        self.inputs={}
-        for name,label,value in [('capital','Virtual starting balance',10000),('allocation','Position allocation (%)',20),('stop','Stop distance (%)',2),('target','Profit target (%)',4),('max_drawdown','Drawdown halt (%)',10),('fee','Fee each side (%)',.10),('slippage','Slippage each side (%)',.05)]:
-            tk.Label(left,text=label,bg=PANEL,fg=MUTED).pack(anchor='w',padx=14,pady=(5,0))
-            var=tk.StringVar(value=str(value))
-            ttk.Entry(left,textvariable=var,width=23).pack(padx=14,pady=(0,2))
-            self.inputs[name]=var
-        self.run_button=ttk.Button(left,text='Train & run test',command=self.run)
-        self.run_button.pack(fill='x',padx=14,pady=(14,6))
-        self.import_button=ttk.Button(left,text='Import market CSV',command=self.load_csv)
-        self.import_button.pack(fill='x',padx=14,pady=4)
-        ttk.Button(left,text='Restore demo data',command=self.demo).pack(fill='x',padx=14,pady=4)
-        ttk.Button(left,text='Export report',command=self.export).pack(fill='x',padx=14,pady=4)
-        right=tk.Frame(main,bg=BG)
-        right.pack(side='left',fill='both',expand=True)
-        self.metrics=tk.StringVar(value='Run an experiment to see results.')
-        tk.Label(right,textvariable=self.metrics,justify='left',bg=PANEL,fg=FG,font=('Segoe UI',12),anchor='w',padx=15,pady=15).pack(fill='x')
-        self.chart=tk.Canvas(right,bg=PANEL,height=230,highlightthickness=0)
-        self.chart.pack(fill='x',pady=10)
-        self.chart.bind('<Configure>',lambda e:self.draw())
-        bar=tk.Frame(right,bg=BG)
-        bar.pack(fill='x')
-        ttk.Button(bar,text='Replay test bars',command=self.replay).pack(side='left')
-        ttk.Button(bar,text='Pause replay',command=self.pause).pack(side='left',padx=8)
-        self.detail=tk.StringVar(value='60% training / 40% unseen test data. Signals execute at the next bar open.')
-        tk.Label(right,textvariable=self.detail,bg=BG,fg=MUTED,anchor='w',wraplength=800,justify='left').pack(fill='x',pady=8)
-        cols=('date','side','price','quantity','fee','pnl','reason')
-        table_frame=tk.Frame(right,bg=BG)
-        table_frame.pack(fill='both',expand=True)
-        self.table=ttk.Treeview(table_frame,columns=cols,show='headings',height=8)
-        widths=(95,50,85,85,65,75,330)
-        for col,w in zip(cols,widths):
-            self.table.heading(col,text=col.upper())
-            self.table.column(col,width=w,minwidth=45,stretch=(col=='reason'))
-        ys=ttk.Scrollbar(table_frame,orient='vertical',command=self.table.yview)
-        xs=ttk.Scrollbar(table_frame,orient='horizontal',command=self.table.xview)
-        self.table.configure(yscrollcommand=ys.set,xscrollcommand=xs.set)
-        self.table.grid(row=0,column=0,sticky='nsew')
-        ys.grid(row=0,column=1,sticky='ns')
-        xs.grid(row=1,column=0,sticky='ew')
-        table_frame.columnconfigure(0,weight=1)
-        table_frame.rowconfigure(0,weight=1)
-        tk.Label(root,textvariable=self.status,bg=BG,fg=MUTED,anchor='w',wraplength=1100,justify='left').pack(fill='x',padx=24,pady=12)
-        self.visible=None
-        self.switch()
-        self.root.after(100,self.poll)
+        self.header=tk.Frame(root,bg=BG);self.header.pack(fill='x',padx=24,pady=(20,8))
+        tk.Label(self.header,text='Trading Lab',bg=BG,fg=FG,font=('Segoe UI',25,'bold')).pack(side='left')
+        tk.Label(self.header,text='PRACTICE ONLY  |  NO REAL MONEY',bg=BG,fg=GREEN,font=('Segoe UI',11,'bold')).pack(side='right')
+        self.nav=tk.Frame(root,bg=BG);self.nav.pack(fill='x',padx=24,pady=8)
+        for m in self.accounts:
+            ttk.Button(self.nav,text=m,command=lambda market=m:self.switch(market)).pack(side='left',padx=(0,8))
+        ttk.Button(self.nav,text='Help',command=self.help).pack(side='right',padx=4)
+        ttk.Button(self.nav,text='Advanced research',command=self.research).pack(side='right',padx=4)
+        ttk.Button(self.nav,text='Saved accounts',command=self.history).pack(side='right',padx=4)
+        viewport=tk.Frame(root,bg=BG);viewport.pack(fill='both',expand=True,padx=24,pady=10)
+        self.scroll=tk.Canvas(viewport,bg=BG,highlightthickness=0)
+        scrollbar=ttk.Scrollbar(viewport,orient='vertical',command=self.scroll.yview)
+        self.scroll.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side='right',fill='y');self.scroll.pack(side='left',fill='both',expand=True)
+        self.body=tk.Frame(self.scroll,bg=BG)
+        self.body_window=self.scroll.create_window((0,0),window=self.body,anchor='nw')
+        self.body.bind('<Configure>',lambda e:self.scroll.configure(scrollregion=self.scroll.bbox('all')))
+        self.scroll.bind('<Configure>',lambda e:self.scroll.itemconfigure(self.body_window,width=e.width))
+        root.bind('<MouseWheel>',lambda e:self.scroll.yview_scroll(int(-e.delta/120),'units'))
+        root.bind('<Button-4>',lambda e:self.scroll.yview_scroll(-1,'units'))
+        root.bind('<Button-5>',lambda e:self.scroll.yview_scroll(1,'units'))
+        self.footer=tk.StringVar(value='Virtual practice account. There is no deposit, broker connection or real-money switch.')
+        tk.Label(root,textvariable=self.footer,bg=BG,fg=MUTED,wraplength=1100,anchor='w',justify='left').pack(fill='x',padx=24,pady=(4,14))
+        self.build()
+        self.poll_id=root.after(100,self.poll)
 
-    def state(self):
-        return self.states[self.market.get()]
+    @property
+    def account(self):return self.accounts[self.market]
 
-    def switch(self):
-        self.pause()
-        self.visible=None
-        s=self.state()
-        self.source.set(f'{self.market.get()}  •  {s["source"]}  •  {len(s["bars"]):,} bars')
-        self.render()
+    def label(self,parent,text,size=11,color=FG,**kwargs):
+        label=tk.Label(parent,text=text,font=('Segoe UI',size),bg=parent['bg'],fg=color,justify='left',anchor='w',**kwargs)
+        if 'wraplength' in kwargs:
+            label.bind('<Configure>',lambda e:label.configure(wraplength=max(180,e.width-6)))
+        return label
 
-    def demo(self):
-        if self.busy:return
-        self.states[self.market.get()]=dict(bars=sample(self.market.get()),source='SYNTHETIC DEMO — not market data',result=None)
-        self.switch()
+    def switch(self,market):
+        if market==self.market:return
+        if self.account and self.account.quantity:
+            messagebox.showinfo('One practice account at a time','Close the current practice position before switching markets. This prevents leaving it unmonitored.')
+            return
+        if self.account and self.account.status=='running' and not self.change(lambda a:a.pause()):return
+        self.epoch+=1;self.connected=False;self.market=market;self.build()
 
-    def load_csv(self):
-        if self.busy:return
-        path=filedialog.askopenfilename(filetypes=[('OHLC CSV','*.csv')])
-        if not path:return
-        try:
-            bars=read_csv(path)
-            self.states[self.market.get()]=dict(bars=bars,source='USER CSV: '+Path(path).name+' (not independently verified)',result=None)
-            self.switch()
-        except (ValueError,OSError,csv.Error) as exc:
-            messagebox.showerror('Could not import',str(exc))
+    def build(self):
+        for child in self.body.winfo_children():child.destroy()
+        self.scroll.yview_moveto(0)
+        if self.account:self.dashboard()
+        else:self.onboarding()
 
-    def run(self):
-        if self.busy:return
-        try:
-            values={k:float(v.get())/(1 if k=='capital' else 100) for k,v in self.inputs.items()}
-            cfg=Config(**values,strategy=self.strategy.get())
-            cfg.validate()
-        except ValueError as exc:
-            messagebox.showerror('Check settings',str(exc));return
-        self.pause()
-        self.busy=True
-        self.run_button.configure(state='disabled')
-        market=self.market.get()
-        bars=list(self.state()['bars'])
-        source=self.state()['source']
-        self.status.set('Training on the first 60%, then simulating the final 40%. Please wait…')
-        def worker():
-            try:
-                result=simulate(bars,cfg)
-                result.update(market=market,source=source,created_at=datetime.now(timezone.utc).isoformat(),app_version='1.0')
-                self.q.put((market,result,None))
-            except Exception as exc:
-                self.q.put((market,None,str(exc)))
-        threading.Thread(target=worker,daemon=True).start()
-
-    def poll(self):
-        try:
-            market,result,error=self.q.get_nowait()
-            self.busy=False
-            self.run_button.configure(state='normal')
-            if error:
-                messagebox.showerror('Experiment failed',error)
-                self.status.set('Experiment failed. No orders were sent.')
-            else:
-                self.states[market]['result']=result
-                self.visible=None
-                save_error=None
-                try:
-                    DATA.mkdir(parents=True,exist_ok=True)
-                    with sqlite3.connect(DATA/'runs.sqlite3') as db:
-                        db.execute('CREATE TABLE IF NOT EXISTS runs(id INTEGER PRIMARY KEY, created TEXT, market TEXT, source TEXT, report TEXT)')
-                        db.execute('INSERT INTO runs(created,market,source,report) VALUES(?,?,?,?)',(result['created_at'],market,result['source'],json.dumps(result)))
-                except (OSError,sqlite3.Error) as exc:save_error=str(exc)
-                self.render()
-                self.status.set(('Test complete. Saved on this laptop. ' if not save_error else 'Test complete, but saving failed: '+save_error+'. ')+ 'Results are hypothetical; no live trading or price feed is connected.')
-        except queue.Empty:pass
-        self.root.after(100,self.poll)
-
-    def render(self):
-        r=self.state()['result']
-        self.table.delete(*self.table.get_children())
-        if not r:
-            self.metrics.set('Ready to test\nChoose a strategy or import historical OHLC data.')
-            self.detail.set('Demo prices are generated. They cannot establish profitability in a real market.')
+    def onboarding(self):
+        panel=tk.Frame(self.body,bg=PANEL,padx=30,pady=22)
+        panel.pack(fill='both',expand=True)
+        self.label(panel,f'Your {self.market.lower()} practice account',23).pack(fill='x',pady=(0,8))
+        self.label(panel,'Learn what the bot does, using money you cannot lose in real life.',12,MUTED).pack(fill='x',pady=(0,20))
+        self.label(panel,'1   Choose the price source',14).pack(fill='x',pady=(0,8))
+        self.mode=tk.StringVar(value='demo')
+        ttk.Radiobutton(panel,text='Offline demo - generated prices, no internet needed',variable=self.mode,value='demo').pack(anchor='w',pady=5)
+        real=ttk.Radiobutton(panel,text='Real Bitcoin prices - virtual trades, internet required',variable=self.mode,value='prices')
+        real.pack(anchor='w',pady=5)
+        if self.market!='Crypto':
+            real.configure(state='disabled')
+            self.label(panel,'Real-price '+self.market.lower()+' practice is not connected yet. This section uses a labeled demo.',11,AMBER,wraplength=850).pack(fill='x',pady=8)
         else:
-            self.metrics.set(f"Net P/L  {r['net_pnl']:+,.2f}  ({r['return_pct']:+.2f}%)     |     Final balance  {r['final_equity']:,.2f}\nMax drawdown  {r['max_drawdown_pct']:.2f}%     |     Closed trades  {r['closed_trades']}     |     Fees  {r['fees']:.2f}\nBuy & hold reference  {r['benchmark_return_pct']:+.2f}%     |     Risk halt: {'YES' if r['halted'] else 'No'}")
-            self.detail.set(f"{r['config']['strategy']} • Train through {r['train_end']} • Test from {r['test_start']} • Results use the settings stored with this run.")
-            for t in r['trades'][-3000:]:
-                self.table.insert('', 'end',values=(t['date'],t['side'],f"{t['price']:.6g}",f"{t['quantity']:.6g}",f"{t['fee']:.3f}",'—' if t['pnl'] is None else f"{t['pnl']:+.2f}",t['reason']))
+            self.label(panel,'Bitcoin is the first supported price feed, not an investment recommendation. No exchange account needed.',11,MUTED,wraplength=850).pack(fill='x',pady=8)
+        self.label(panel,'2   Set your virtual limits',14).pack(fill='x',pady=(14,6))
+        grid=tk.Frame(panel,bg=PANEL);grid.pack(fill='x')
+        self.settings={}
+        for row,(key,title,default,explain) in enumerate([
+            ('capital','Starting practice money ($)','10000','Virtual US dollars, not a deposit.'),
+            ('allocation','Use at most this % per trade','10','Limits spending on one position; the rest stays as virtual cash.'),
+            ('loss_limit','Stop after account drops this %','5','Measured from its highest observed value. A price gap can exceed it.')]):
+            self.label(grid,title,11).grid(row=row,column=0,sticky='w',pady=8,padx=(0,16))
+            v=tk.StringVar(value=default);self.settings[key]=v
+            ttk.Entry(grid,textvariable=v,width=12).grid(row=row,column=1,sticky='w',padx=(0,16))
+            self.label(grid,explain,10,MUTED,wraplength=340).grid(row=row,column=2,sticky='w')
+        self.label(panel,'3   Review before starting',14).pack(fill='x',pady=(18,6))
+        self.label(panel,'The bot may wait without trading. Its small local AI model has no proven trading edge.\nPractice exits use a 2% price-drop stop and 4% rise target, plus 0.1% estimated fee and 0.05% slippage each side.\nWhen this app is closed or disconnected, it cannot monitor positions or apply exits.',11,MUTED,wraplength=950).pack(fill='x',pady=6)
+        ttk.Button(panel,text='Create practice account ->',command=self.create).pack(anchor='w',pady=(18,6))
+
+    def create(self):
+        try:
+            values={k:float(v.get())/(1 if k=='capital' else 100) for k,v in self.settings.items()}
+            a=Account.create(self.market,self.mode.get(),**values)
+            self.store.save(a)
+        except Exception as exc:
+            messagebox.showerror('Check practice settings',str(exc));return
+        self.accounts[self.market]=a
+        self.epoch+=1;self.connected=False;self.build()
+
+    def dashboard(self):
+        a=self.account
+        strip=tk.Frame(self.body,bg=PANEL,padx=16,pady=12);strip.pack(fill='x')
+        self.source_label=self.label(strip,'',11,AMBER);self.source_label.pack(fill='x')
+        self.status_label=self.label(strip,'',20);self.status_label.pack(fill='x',pady=(6,2))
+        self.reason_label=self.label(strip,'',11,MUTED,wraplength=1050);self.reason_label.pack(fill='x')
+        cards=tk.Frame(self.body,bg=BG);cards.pack(fill='x',pady=12)
+        self.cards={}
+        for i,(key,title) in enumerate([('value','PRACTICE VALUE'),('change','TOTAL GAIN / LOSS'),('cash','AVAILABLE CASH'),('position','OPEN POSITION')]):
+            frame=tk.Frame(cards,bg=PANEL,padx=14,pady=14);frame.grid(row=0,column=i,sticky='nsew',padx=(0,8 if i<3 else 0))
+            cards.columnconfigure(i,weight=1,uniform='card')
+            self.label(frame,title,9,MUTED).pack(fill='x')
+            self.cards[key]=self.label(frame,'',20);self.cards[key].pack(fill='x',pady=(6,0))
+        buttons=tk.Frame(self.body,bg=BG);buttons.pack(fill='x')
+        self.start_button=ttk.Button(buttons,text='Start practice',command=self.start);self.start_button.pack(side='left',padx=(0,8))
+        self.pause_button=ttk.Button(buttons,text='Pause new trades',command=self.pause);self.pause_button.pack(side='left',padx=(0,8))
+        self.sell_button=ttk.Button(buttons,text='Close practice position',command=self.sell);self.sell_button.pack(side='left',padx=(0,8))
+        ttk.Button(buttons,text='Export',command=self.export).pack(side='right')
+        ttk.Button(buttons,text='New account',command=self.new_account).pack(side='right',padx=8)
+        self.info_label=self.label(self.body,'',10,MUTED,wraplength=1080);self.info_label.pack(fill='x',pady=10)
+        self.chart=tk.Canvas(self.body,bg=PANEL,height=155,highlightthickness=0);self.chart.pack(fill='x')
+        self.chart.bind('<Configure>',lambda e:self.draw())
+        self.label(self.body,'What the bot did',13).pack(fill='x',pady=(12,6))
+        holder=tk.Frame(self.body,bg=BG);holder.pack(fill='both',expand=True)
+        self.table=ttk.Treeview(holder,columns=('time','action','reason'),show='headings',height=5)
+        for col,title,width in [('time','TIME (UTC)',155),('action','ACTION',85),('reason','PLAIN-LANGUAGE EXPLANATION',700)]:
+            self.table.heading(col,text=title);self.table.column(col,width=width,minwidth=60,stretch=col=='reason')
+        scroll=ttk.Scrollbar(holder,orient='vertical',command=self.table.yview)
+        self.table.configure(yscrollcommand=scroll.set)
+        self.table.pack(side='left',fill='both',expand=True);scroll.pack(side='right',fill='y')
+        self.table.bind('<Double-1>',self.event_detail)
+        self.refresh()
+
+    def refresh(self):
+        if not self.account or not hasattr(self,'cards') or not self.body.winfo_children():return
+        a=self.account
+        if not hasattr(self,'status_label') or not self.status_label.winfo_exists():return
+        label={'running':'Watching the market','paused':'New trades are paused','attention':'Your attention is needed','halted':'Stopped by your loss control'}[a.status]
+        if self.busy:label='Loading prices...' if not a.model else 'Checking prices...'
+        self.status_label.configure(text=label)
+        self.reason_label.configure(text=a.explanation)
+        self.source_label.configure(text=f"{a.market}  |  "+('SYNTHETIC DEMO - accelerated generated prices' if a.mode=='demo' else 'BTC/USD | Kraken public prices | LOCAL PAPER TRADES'))
+        equity=a.equity();pnl=equity-a.initial
+        self.cards['value'].configure(text=f'${equity:,.2f}')
+        self.cards['change'].configure(text=f'${pnl:+,.2f}',fg=GREEN if pnl>=0 else AMBER)
+        self.cards['cash'].configure(text=f'${a.cash:,.2f}')
+        self.cards['position'].configure(text='Holding' if a.quantity else 'None')
+        age='Not connected' if not a.last_quote_at else time.strftime('%H:%M:%S UTC',time.gmtime(a.last_quote_at))
+        self.info_label.configure(text=f"{a.allocation:.0%} maximum spend per trade | {a.loss_limit:.0%} account-drop halt | Estimated fees paid ${a.fees:.2f}\nLast received: {age}. Value includes estimated exit costs; it may be stale while disconnected. Double-click an activity for details.")
+        self.start_button.configure(text='Reconnect / resume' if a.model else 'Start practice',state='disabled' if a.halted or self.busy or a.status=='running' else 'normal')
+        self.pause_button.configure(state='normal' if a.status=='running' else 'disabled')
+        self.sell_button.configure(state='normal' if a.quantity and not self.busy else 'disabled')
+        self.table.delete(*self.table.get_children())
+        for i,event in enumerate(a.events[-150:]):
+            self.table.insert('', 'end',iid=str(i),values=(event['time'][11:19],event['kind'],event['reason']))
         self.draw()
 
     def draw(self):
-        c=self.chart;c.delete('all')
-        r=self.state()['result']
-        if not r:
-            c.create_text(25,35,anchor='w',text='EQUITY CURVE • run a test to begin',fill=MUTED,font=('Segoe UI',11));return
-        curve=r['curve'][:self.visible] if self.visible else r['curve']
-        vals=[r['config']['capital']]+[x['equity'] for x in curve]
-        w,h=max(300,c.winfo_width()),c.winfo_height()
-        lo,hi=min(vals),max(vals)
-        span=max(hi-lo,1)
-        c.create_text(18,18,anchor='w',text='TEST EQUITY • '+r['source'][:70],fill=MUTED)
-        for j in range(4):
-            y=45+j*(h-70)/3
-            c.create_line(75,y,w-18,y,fill='#24344a')
-            c.create_text(65,y,anchor='e',text=f'{hi-j*span/3:,.0f}',fill=MUTED)
-        # Limit rendering work; full-resolution results remain in reports.
-        step=max(1,len(vals)//1200)
-        indices=list(range(0,len(vals),step))
-        if indices[-1]!=len(vals)-1:indices.append(len(vals)-1)
-        coords=[]
-        for i in indices:coords.extend((75+i/max(1,len(vals)-1)*(w-95),45+(hi-vals[i])/span*(h-70)))
-        if len(coords)>=4:c.create_line(*coords,fill=ACCENT,width=2)
+        if not self.account or not hasattr(self,'chart') or not self.chart.winfo_exists():return
+        c=self.chart;c.delete('all');a=self.account
+        vals=[a.initial]+[h['equity'] for h in a.history]
+        w=max(c.winfo_width(),300);h=c.winfo_height();lo=min(vals);hi=max(vals);span=max(hi-lo,1)
+        c.create_text(16,17,anchor='w',text='YOUR VIRTUAL ACCOUNT VALUE | sampled while the app is connected',fill=MUTED)
+        for j in range(3):
+            y=40+j*(h-60)/2
+            c.create_line(78,y,w-18,y,fill='#293a52')
+            c.create_text(67,y,anchor='e',text=f'{hi-j*span/2:,.0f}',fill=MUTED)
+        if len(vals)<2:
+            c.create_text(w/2,90,text='Start practice to begin. Waiting in cash is a valid action.',fill=FG);return
+        ids=list(range(0,len(vals),max(1,len(vals)//600)))
+        if ids[-1]!=len(vals)-1:ids.append(len(vals)-1)
+        points=[]
+        for i in ids:points.extend((78+i/(len(vals)-1)*(w-98),40+(hi-vals[i])/span*(h-60)))
+        c.create_line(*points,fill=GREEN,width=2)
+
+    def change(self,fn):
+        try:self.accounts[self.market]=transact(self.store,self.account,fn)
+        except Exception as exc:
+            self.connected=False
+            messagebox.showerror('Could not save safely',str(exc)+'\nNo new practice update was applied.');return False
+        return True
+
+    def start(self):
+        if self.busy or not self.account:return
+        if self.change(lambda a:a.start()):
+            self.connected=True;self.next_fetch=0;self.epoch+=1;self.refresh()
 
     def pause(self):
-        if self.replay_id:
-            self.root.after_cancel(self.replay_id)
-            self.replay_id=None
+        if self.change(lambda a:a.pause()):
+            self.epoch+=1;self.refresh()
 
-    def replay(self):
-        if not self.state()['result'] or self.busy:return
-        self.pause();self.visible=1;self.tick()
+    def sell(self):
+        if self.busy or not self.account.quantity:return
+        if not messagebox.askyesno('Close virtual holdings?','Sell the full practice position using a fresh price and pause new trades?\n\nThis uses virtual money only.'):return
+        self.epoch+=1;self.connected=False
+        self.launch('close')
 
-    def tick(self):
-        r=self.state()['result']
-        if not r:return
-        point=r['curve'][self.visible-1]
-        self.draw()
-        self.detail.set(f"HISTORICAL REPLAY • {point['date']} • equity {point['equity']:,.2f} • previous-bar signal {point['signal']} • risk halted: {point['halted']}\nMetrics and trade table above/below show the completed run; replay is an animation, not live trading.")
-        if self.visible<len(r['curve']):
-            self.visible+=1
-            self.replay_id=self.root.after(70,self.tick)
-        else:self.replay_id=None
+    @staticmethod
+    def fetch(account):
+        if account.mode=='prices':return kraken_snapshot()
+        return demo_snapshot(account.market,account.demo_step)
+
+    def launch(self,action='tick'):
+        if self.busy:return
+        self.busy=True
+        a=copy.deepcopy(self.account);epoch=self.epoch;market=self.market
+        self.refresh()
+        def worker():
+            try:
+                snapshot=self.fetcher(a)
+                if action=='close':a.close_position(snapshot)
+                else:a.process(snapshot)
+                if a.mode=='demo':a.demo_step+=1
+                self.q.put((epoch,market,a,None,action))
+            except Exception as exc:self.q.put((epoch,market,None,str(exc),action))
+        threading.Thread(target=worker,daemon=True).start()
+
+    def poll(self):
+        if self.closed:return
+        try:
+            epoch,market,candidate,error,action=self.q.get_nowait()
+            self.busy=False
+            if epoch==self.epoch and market==self.market:
+                if error:
+                    self.connected=False
+                    self.change(lambda a:a.fail(error))
+                else:
+                    try:
+                        self.store.save(candidate)
+                        self.accounts[market]=candidate
+                        if candidate.halted or action=='close':self.connected=False
+                    except Exception as exc:
+                        self.connected=False
+                        messagebox.showerror('Practice paused',str(exc)+'\nThe incoming update was not applied. Reopen the app before continuing.')
+                        self.account.status='attention'
+                        self.account.explanation='Saving failed. Reopen the app to reload the last saved account.'
+                self.next_fetch=time.monotonic()+(3 if self.account.mode=='demo' else 20)
+                self.refresh()
+        except queue.Empty:pass
+        if self.connected and self.account and not self.busy and time.monotonic()>=self.next_fetch:
+            self.launch()
+        self.poll_id=self.root.after(100,self.poll)
+
+    def new_account(self):
+        if self.busy:return
+        if self.account.quantity:
+            messagebox.showinfo('Close the position first','Close your virtual position before creating another account. Existing results will stay in Saved accounts.');return
+        if not messagebox.askyesno('Create another practice account?','Keep this account in Saved accounts and return to setup?'):return
+        if self.account.status=='running' and not self.change(lambda a:a.pause()):return
+        self.epoch+=1;self.connected=False;self.accounts[self.market]=None;self.build()
+
+    def event_detail(self,event=None):
+        selected=self.table.selection()
+        if not selected:return
+        item=self.account.events[-150:][int(selected[0])]
+        text=item['reason']
+        for k in ('price','quantity','fee','pnl'):
+            if item.get(k) is not None:text+=f'\n{k.title()}: {item[k]:,.6f}'
+        messagebox.showinfo('Practice activity',text)
 
     def export(self):
-        r=self.state()['result']
-        if not r:
-            messagebox.showinfo('No report','Run a test first.');return
-        path=filedialog.asksaveasfilename(defaultextension='.json',initialfile=self.market.get().lower()+'-report.json',filetypes=[('Full report JSON','*.json')])
-        if path:
-            try:
-                Path(path).write_text(json.dumps(r,indent=2),encoding='utf-8')
-                messagebox.showinfo('Export complete','Saved full settings, provenance, trades and equity history.')
-            except OSError as exc:messagebox.showerror('Export failed',str(exc))
+        if not self.account:return
+        self.write_report(self.account.report(),self.account.market.lower()+'-practice.json')
+
+    def write_report(self,report,name):
+        path=filedialog.asksaveasfilename(initialfile=name,defaultextension='.json',filetypes=[('Practice report','*.json')])
+        if not path:return
+        try:Path(path).write_text(json.dumps(report,indent=2,allow_nan=False),encoding='utf-8')
+        except Exception as exc:messagebox.showerror('Could not export',str(exc))
 
     def history(self):
-        try:
-            if not (DATA/'runs.sqlite3').exists():
-                messagebox.showinfo('Saved runs','No saved runs yet.');return
-            with sqlite3.connect(DATA/'runs.sqlite3') as db:
-                rows=db.execute('SELECT id,created,market,source,report FROM runs ORDER BY id DESC LIMIT 100').fetchall()
-        except sqlite3.Error as exc:
-            messagebox.showerror('History unavailable',str(exc));return
-        win=tk.Toplevel(self.root);win.title('Saved experiments — last 100');win.geometry('900x450')
-        box=tk.Listbox(win,font=('Segoe UI',10),bg=BG,fg=FG)
-        box.pack(fill='both',expand=True,padx=10,pady=10)
-        for ident,date,market,source,payload in rows:
-            r=json.loads(payload)
-            box.insert('end',f"#{ident} • {date[:19]} • {market} • {r['config']['strategy']} • {r['return_pct']:+.2f}% • {source}")
-        def export_saved():
-            selected=box.curselection()
-            if not selected:return
-            path=filedialog.asksaveasfilename(defaultextension='.json',initialfile=f'run-{rows[selected[0]][0]}.json')
-            if path:
-                try:Path(path).write_text(rows[selected[0]][4],encoding='utf-8')
-                except OSError as exc:messagebox.showerror('Export failed',str(exc))
-        ttk.Button(win,text='Export selected report',command=export_saved).pack(pady=8)
+        try:rows=self.store.reports()
+        except Exception as exc:messagebox.showerror('Could not read accounts',str(exc));return
+        win=tk.Toplevel(self.root);win.title('Saved practice accounts');win.geometry('850x400')
+        box=tk.Listbox(win,bg=BG,fg=FG,font=('Segoe UI',11));box.pack(fill='both',expand=True,padx=12,pady=12)
+        for updated,d in rows:
+            a=Account(**d)
+            box.insert('end',f"{updated[:19]} | {a.market} | {'DEMO' if a.mode=='demo' else 'REAL PRICES / VIRTUAL MONEY'} | ${a.equity():,.2f}")
+        def export_selected():
+            if box.curselection():
+                a=Account(**rows[box.curselection()[0]][1]);self.write_report(a.report(),'practice-'+a.id[:8]+'.json')
+        ttk.Button(win,text='Export selected account',command=export_selected).pack(pady=8)
+
+    def research(self):
+        subprocess.Popen([sys.executable,str(Path(__file__).with_name('research_app.py'))])
+
+    def help(self):
+        messagebox.showinfo('How practice works',
+            'Everything here uses virtual money. There is no deposit or connected trading account.\n\n'
+            'Demo: generated prices move faster so you can learn the controls. They do not predict real results.\n\n'
+            'Real prices: Bitcoin data is read from Kraken. Trades are simulated locally, not sent to Kraken. Availability can vary by network.\n\n'
+            'Start: allow the model to open a practice trade when its signal appears. It may wait.\n\n'
+            'Pause new trades: stop new entries. Existing positions still update; exit rules run while connected.\n\n'
+            'Close practice position: sell all virtual holdings at a fresh simulated fill and pause entries.\n\n'
+            'Closing the app or losing internet stops monitoring. Reopening keeps holdings and starts paused. A later price can jump past your limit.\n\n'
+            'The AI is a small local model, not a proven profitable strategy. Default costs are estimates, not a broker fee quote.')
+
+    def close_app(self):
+        if self.account and self.account.quantity:
+            if not messagebox.askyesno('Leave virtual holdings open?', 'Closing the app stops all monitoring. Your practice holdings will be saved but no exits run while closed.\n\nClose the app anyway?'):return
+        self.epoch+=1;self.connected=False
+        if self.account and self.account.status=='running':
+            if not self.change(lambda a:a.pause()):return
+        self.closed=True
+        self.root.after_cancel(self.poll_id)
+        self.root.destroy()
 
 if __name__=='__main__':
     root=tk.Tk()
-    App(root)
-    root.mainloop()
+    try:App(root)
+    except Exception as exc:
+        messagebox.showerror('Could not open Trading Lab',str(exc)+'\nYour saved accounts were not reset.')
+        root.destroy()
+    else:root.mainloop()
